@@ -739,13 +739,44 @@ window.DATA = {
   const root = document.getElementById('scr-drugometr');
   const friendsEl = root.querySelector('#dm-friends');
   const panelEl = root.querySelector('#dm-panel');
-  function render() {
-    const ribbon = root.querySelector('.dm-ribbon'), rx = ribbon ? ribbon.scrollLeft : 0;
+  /* Движение из комментария A3 (решение Бахти 17.11): карточка плавно растёт, лента выезжает справа;
+     сворачивание (A4) — тем же движением наоборот. 280 мс, ease-out; при prefers-reduced-motion — без движения */
+  const DUR = 280, EASE = 'cubic-bezier(.2,.8,.2,1)';
+  const still = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
+  let shown = null;   /* какой друг раскрыт в DOM сейчас */
+  function render(anim) {
+    const prev = shown;
+    const oldCard = prev ? friendsEl.querySelector(`[data-friend="${prev}"]`) : null;
+    const ribbon = oldCard && oldCard.querySelector('.dm-ribbon'), rx = ribbon ? ribbon.scrollLeft : 0;
+    let ghost = null, ghostH = 0;
+    if (anim && oldCard && prev !== S.open && !still()) { ghostH = oldCard.offsetHeight; ghost = [...oldCard.querySelectorAll('.dm-friend__hint, .dm-ribbon')]; }
     friendsEl.innerHTML = list();
-    const nr = root.querySelector('.dm-ribbon'); if (nr) nr.scrollLeft = rx;
+    shown = S.open;
+    const nr = S.open && friendsEl.querySelector(`[data-friend="${S.open}"] .dm-ribbon`); if (nr && S.open === prev) nr.scrollLeft = rx;
     const html = panel();
     panelEl.innerHTML = html; panelEl.hidden = !html;
     root.classList.toggle('has-panel', !!html);
+    if (!anim || still()) return;
+    /* Сворачивание: старое содержимое уезжает вправо, высота карточки уменьшается до 80 */
+    if (ghost) {
+      const card = friendsEl.querySelector(`[data-friend="${prev}"]`);
+      if (card) {
+        ghost.forEach(n => card.appendChild(n)); ghost[1] && (ghost[1].scrollLeft = rx);
+        card.style.overflow = 'hidden';
+        card.animate([{ height: ghostH + 'px' }, { height: '80px' }], { duration: DUR, easing: EASE })
+          .onfinish = () => { ghost.forEach(n => n.remove()); card.style.overflow = ''; };
+        ghost.forEach(n => n.animate([{ transform: 'none', opacity: 1 }, { transform: 'translateX(120px)', opacity: 0 }], { duration: DUR, easing: EASE, fill: 'forwards' }));
+      }
+    }
+    /* Раскрытие: высота растёт от 80, подсказка проявляется, лента выезжает справа */
+    if (S.open && S.open !== prev) {
+      const card = friendsEl.querySelector(`[data-friend="${S.open}"]`), h = card.offsetHeight;
+      card.style.overflow = 'hidden';
+      card.animate([{ height: '80px' }, { height: h + 'px' }], { duration: DUR, easing: EASE }).onfinish = () => { card.style.overflow = ''; };
+      const hint = card.querySelector('.dm-friend__hint'), rib = card.querySelector('.dm-ribbon');
+      hint && hint.animate([{ opacity: 0 }, { opacity: 1 }], { duration: DUR, easing: EASE });
+      rib && rib.animate([{ transform: 'translateX(120px)', opacity: 0 }, { transform: 'none', opacity: 1 }], { duration: DUR, easing: EASE });
+    }
   }
   UI.renderDrugometr = render;
   /* Раскрытая карточка не должна прятаться под панелью выбора: докручиваем список, чтобы лента была видна над панелью */
@@ -758,8 +789,8 @@ window.DATA = {
 
   root.addEventListener('click', e => {
     const t = e.target.closest('[data-toggle]');
-    if (t) { const id = t.dataset.toggle; const was = S.open === id; S.open = was ? null : id; render();
-      if (!was) reveal(id);
+    if (t) { const id = t.dataset.toggle; const was = S.open === id; S.open = was ? null : id; render(true);
+      if (!was) setTimeout(() => reveal(id), still() ? 0 : DUR + 20);   /* докрутка — после того как карточка выросла */
       return; }
     const p = e.target.closest('[data-pick]');
     if (p) { const [fid, pid] = p.dataset.pick.split(':'); const cur = S.sel[fid] || [];
